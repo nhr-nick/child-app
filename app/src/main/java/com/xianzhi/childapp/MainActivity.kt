@@ -10,8 +10,12 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.TextView
-import android.widget.Toast
+import android.graphics.Bitmap
+import android.graphics.Color
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -27,6 +31,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvStatus: TextView
     private lateinit var tvDeviceOwner: TextView
     private lateinit var tvDeviceId: TextView
+    private lateinit var ivQrCode: ImageView
     private lateinit var etServerUrl: EditText
     private lateinit var btnStartService: Button
     private lateinit var btnSetDeviceOwner: Button
@@ -48,6 +53,7 @@ class MainActivity : AppCompatActivity() {
         tvStatus = findViewById(R.id.tv_status)
         tvDeviceOwner = findViewById(R.id.tv_device_owner)
         tvDeviceId = findViewById(R.id.tv_device_id)
+        ivQrCode = findViewById(R.id.iv_qr_code)
         etServerUrl = findViewById(R.id.et_server_url)
         btnStartService = findViewById(R.id.btn_start_service)
         btnSetDeviceOwner = findViewById(R.id.btn_set_device_owner)
@@ -92,12 +98,31 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateStatus() {
         val isOwner = AppFreezeManager.isDeviceOwner(this)
+        val deviceId = DeviceIdManager.getDeviceId(this)
         tvDeviceOwner.text = if (isOwner) "设备所有者: 已激活" else "设备所有者: 未激活"
-        tvDeviceId.text = "设备ID: ${DeviceIdManager.getDeviceId(this)}"
+        tvDeviceId.text = "设备ID: $deviceId"
         btnStartService.isEnabled = isOwner
+        // 生成设备ID二维码
+        generateQrCode(deviceId)
         // 设备所有者激活时确保防卸载
         if (isOwner) {
             AppFreezeManager.protectSelf(this)
+        }
+    }
+
+    private fun generateQrCode(content: String) {
+        try {
+            val writer = QRCodeWriter()
+            val bitMatrix = writer.encode(content, BarcodeFormat.QR_CODE, 200, 200)
+            val bitmap = Bitmap.createBitmap(200, 200, Bitmap.Config.RGB_565)
+            for (x in 0 until 200) {
+                for (y in 0 until 200) {
+                    bitmap.setPixel(x, y, if (bitMatrix[x, y]) Color.BLACK else Color.WHITE)
+                }
+            }
+            ivQrCode.setImageBitmap(bitmap)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "生成二维码失败", e)
         }
     }
 
