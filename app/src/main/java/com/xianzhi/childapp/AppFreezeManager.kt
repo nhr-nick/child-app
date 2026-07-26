@@ -24,7 +24,7 @@ object AppFreezeManager {
         val componentName = ComponentName(context, DeviceAdminReceiver::class.java)
 
         return try {
-            dpm.setPackagesSuspended(componentName, packageName, true)
+            dpm.setPackagesSuspended(componentName, arrayOf(packageName), true)
             Log.d(TAG, "已冻结应用: $packageName")
             true
         } catch (e: Exception) {
@@ -41,7 +41,7 @@ object AppFreezeManager {
         val componentName = ComponentName(context, DeviceAdminReceiver::class.java)
 
         return try {
-            dpm.setPackagesSuspended(componentName, packageName, false)
+            dpm.setPackagesSuspended(componentName, arrayOf(packageName), false)
             Log.d(TAG, "已解冻应用: $packageName")
             true
         } catch (e: Exception) {
