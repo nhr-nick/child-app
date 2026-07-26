@@ -4,6 +4,8 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -118,6 +120,11 @@ class WebSocketService : Service() {
                     val frozenApps = appsArray.map { it.asString }
                     handleFrozenApps(frozenApps)
                 }
+                "dns_setting" -> {
+                    val hostname = json.get("hostname")?.asString
+                    val enabled = json.get("enabled")?.asBoolean ?: true
+                    handleDnsSetting(hostname, enabled)
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "解析消息失败", e)
@@ -151,6 +158,27 @@ class WebSocketService : Service() {
         }
 
         Log.d(TAG, "冻结应用处理完成，冻结数量: ${appsToFreeze.size}")
+    }
+
+    /**
+     * 处理DNS设置推送
+     * 由家长端远程控制加密DNS的开启/关闭
+     */
+    private fun handleDnsSetting(hostname: String?, enabled: Boolean) {
+        if (enabled && !hostname.isNullOrEmpty()) {
+            val success = AppFreezeManager.setPrivateDns(this, hostname)
+            Log.d(TAG, "设置加密DNS: $hostname, 结果: $success")
+        } else {
+            // 关闭加密DNS
+            val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val componentName = ComponentName(this, DeviceAdminReceiver::class.java)
+            try {
+                dpm.setGlobalSetting(componentName, "private_dns_mode", "off")
+                Log.d(TAG, "已关闭加密DNS")
+            } catch (e: Exception) {
+                Log.e(TAG, "关闭加密DNS失败", e)
+            }
+        }
     }
 
     // ========== 自动重连 ==========

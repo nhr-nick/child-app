@@ -9,8 +9,6 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
-import android.widget.Switch
-import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -28,8 +26,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvStatus: TextView
     private lateinit var tvDeviceOwner: TextView
     private lateinit var tvDeviceId: TextView
-    private lateinit var etDnsHostname: EditText
-    private lateinit var switchDns: Switch
     private lateinit var btnStartService: Button
     private lateinit var btnSetDeviceOwner: Button
 
@@ -50,8 +46,6 @@ class MainActivity : AppCompatActivity() {
         tvStatus = findViewById(R.id.tv_status)
         tvDeviceOwner = findViewById(R.id.tv_device_owner)
         tvDeviceId = findViewById(R.id.tv_device_id)
-        etDnsHostname = findViewById(R.id.et_dns_hostname)
-        switchDns = findViewById(R.id.switch_dns)
         btnStartService = findViewById(R.id.btn_start_service)
         btnSetDeviceOwner = findViewById(R.id.btn_set_device_owner)
 
@@ -72,35 +66,6 @@ class MainActivity : AppCompatActivity() {
             startControlService()
         }
 
-        // 设置加密DNS
-        switchDns.setOnCheckedChangeListener { _, isChecked ->
-            val hostname = etDnsHostname.text.toString().trim()
-            if (hostname.isEmpty()) {
-                Toast.makeText(this, "请输入DNS域名", Toast.LENGTH_SHORT).show()
-                switchDns.isChecked = !isChecked
-                return@setOnCheckedChangeListener
-            }
-
-            if (isChecked) {
-                val success = AppFreezeManager.setPrivateDns(this, hostname)
-                Toast.makeText(
-                    this,
-                    if (success) "加密DNS已设置" else "设置失败，请检查设备所有者权限",
-                    Toast.LENGTH_SHORT
-                ).show()
-            } else {
-                val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
-                val componentName = ComponentName(this, DeviceAdminReceiver::class.java)
-                try {
-                    dpm.setGlobalSetting(componentName, "private_dns_mode", "off")
-                    Toast.makeText(this, "加密DNS已关闭", Toast.LENGTH_SHORT).show()
-                } catch (e: Exception) {
-                    Toast.makeText(this, "关闭DNS失败", Toast.LENGTH_SHORT).show()
-                    switchDns.isChecked = true
-                }
-            }
-        }
-
         // 设备所有者设置提示
         btnSetDeviceOwner.setOnClickListener {
             showDeviceOwnerInstructions()
@@ -112,7 +77,6 @@ class MainActivity : AppCompatActivity() {
         tvDeviceOwner.text = if (isOwner) "设备所有者: 已激活" else "设备所有者: 未激活"
         tvDeviceId.text = "设备ID: ${DeviceIdManager.getDeviceId(this)}"
         btnStartService.isEnabled = isOwner
-        switchDns.isEnabled = isOwner
         // 设备所有者激活时确保防卸载
         if (isOwner) {
             AppFreezeManager.protectSelf(this)

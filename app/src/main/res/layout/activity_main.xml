@@ -57,28 +57,5 @@
             android:text="启动管控服务"
             android:layout_marginBottom="24dp" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="加密DNS设置"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="8dp" />
-
-        <EditText
-            android:id="@+id/et_dns_hostname"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:hint="输入DNS域名（如 dns.adguard.com）"
-            android:inputType="textUri"
-            android:layout_marginBottom="8dp" />
-
-        <Switch
-            android:id="@+id/switch_dns"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:text="启用加密DNS"
-            android:layout_marginBottom="16dp" />
-
     </LinearLayout>
 </ScrollView>
