@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import android.os.Build
+import android.os.UserManager
 import android.util.Log
 
 /**
@@ -151,5 +152,61 @@ object AppFreezeManager {
      */
     fun protectSelf(context: Context) {
         setUninstallBlocked(context, context.packageName, true)
+    }
+
+    /**
+     * 远程卸载应用（需要设备所有者权限）
+     */
+    fun uninstallApp(context: Context, packageName: String): Boolean {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        val componentName = ComponentName(context, DeviceAdminReceiver::class.java)
+
+        return try {
+            dpm.uninstallPackage(componentName, packageName)
+            Log.d(TAG, "已卸载应用: $packageName")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "卸载应用失败: $packageName", e)
+            false
+        }
+    }
+
+    /**
+     * 禁止安装应用（包括应用市场和包管理器）
+     * 需要设备所有者权限
+     */
+    fun setInstallBlocked(context: Context, blocked: Boolean): Boolean {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        val componentName = ComponentName(context, DeviceAdminReceiver::class.java)
+
+        return try {
+            if (blocked) {
+                dpm.addUserRestriction(componentName, UserManager.DISALLOW_INSTALL_APPS)
+                dpm.addUserRestriction(componentName, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+            } else {
+                dpm.removeUserRestriction(componentName, UserManager.DISALLOW_INSTALL_APPS)
+                dpm.removeUserRestriction(componentName, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+            }
+            Log.d(TAG, "安装限制设置: $blocked")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "安装限制设置失败", e)
+            false
+        }
+    }
+
+    /**
+     * 检查安装是否被禁止
+     */
+    fun isInstallBlocked(context: Context): Boolean {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        val componentName = ComponentName(context, DeviceAdminReceiver::class.java)
+
+        return try {
+            dpm.getUserRestrictions(componentName)
+                .getBoolean(UserManager.DISALLOW_INSTALL_APPS, false)
+        } catch (e: Exception) {
+            false
+        }
     }
 }

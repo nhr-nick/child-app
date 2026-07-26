@@ -19,6 +19,10 @@ import java.net.URI
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
  * WebSocket后台服务
@@ -81,6 +85,8 @@ class WebSocketService : Service() {
                 override fun onOpen(handshake: ServerHandshake?) {
                     Log.d(TAG, "WebSocket连接已建立")
                     isConnecting = false
+                    // 连接成功后上报已安装应用列表
+                    reportInstalledApps()
                 }
 
                 override fun onMessage(message: String?) {
@@ -124,6 +130,16 @@ class WebSocketService : Service() {
                     val hostname = json.get("hostname")?.asString
                     val enabled = json.get("enabled")?.asBoolean ?: true
                     handleDnsSetting(hostname, enabled)
+                }
+                "uninstall_app" -> {
+                    val packageName = json.get("packageName")?.asString
+                    if (!packageName.isNullOrEmpty()) {
+                        handleUninstallApp(packageName)
+                    }
+                }
+                "install_restriction" -> {
+                    val blocked = json.get("blocked")?.asBoolean ?: false
+                    handleInstallRestriction(blocked)
                 }
             }
         } catch (e: Exception) {
@@ -181,6 +197,22 @@ class WebSocketService : Service() {
         }
     }
 
+    /**
+     * 处理远程卸载应用
+     */
+    private fun handleUninstallApp(packageName: String) {
+        val success = AppFreezeManager.uninstallApp(this, packageName)
+        Log.d(TAG, "远程卸载应用: $packageName, 结果: $success")
+    }
+
+    /**
+     * 处理安装限制推送
+     */
+    private fun handleInstallRestriction(blocked: Boolean) {
+        val success = AppFreezeManager.setInstallBlocked(this, blocked)
+        Log.d(TAG, "安装限制设置: $blocked, 结果: $success")
+    }
+
     // ========== 自动重连 ==========
 
     private fun startReconnectScheduler() {
@@ -223,6 +255,57 @@ class WebSocketService : Service() {
                 .setContentText("管控服务运行中")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .build()
+        }
+    }
+
+    // ========== 上报已安装应用 ==========
+
+    /**
+     * 读取已安装的非系统应用列表，上报给服务端
+     */
+    private fun reportInstalledApps() {
+        try {
+            val pm = packageManager
+            val apps = pm.getInstalledApplications(0)
+                .filter { appInfo ->
+                    // 过滤掉系统应用和自身
+                    (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0
+                            && appInfo.packageName != packageName
+                }
+                .map { appInfo ->
+                    mapOf(
+                        "package_name" to appInfo.packageName,
+                        "app_name" to (appInfo.loadLabel(pm).toString())
+                    )
+                }
+
+            val jsonBody = gson.toJson(mapOf(
+                "deviceId" to deviceId,
+                "apps" to apps
+            ))
+
+            // 通过HTTP上报到孩子-服务端
+            Thread {
+                try {
+                    val baseUrl = serverUrl.replace("/ws", "").replace("wss://", "https://").replace("ws://", "http://")
+                    val url = "$baseUrl/api/report-apps"
+                    val client = OkHttpClient.Builder()
+                        .connectTimeout(10, TimeUnit.SECONDS)
+                        .writeTimeout(10, TimeUnit.SECONDS)
+                        .build()
+                    val jsonType = "application/json; charset=utf-8".toMediaType()
+                    val request = Request.Builder()
+                        .url(url)
+                        .post(jsonBody.toRequestBody(jsonType))
+                        .build()
+                    val response = client.newCall(request).execute()
+                    Log.d(TAG, "上报应用列表: ${apps.size}个应用, 结果: ${response.isSuccessful}")
+                } catch (e: Exception) {
+                    Log.e(TAG, "上报应用列表失败", e)
+                }
+            }.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "读取应用列表失败", e)
         }
     }
 }
