@@ -33,7 +33,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvDeviceOwner: TextView
     private lateinit var tvDeviceId: TextView
     private lateinit var ivQrCode: ImageView
-    private lateinit var etServerUrl: EditText
     private lateinit var btnStartService: Button
     private lateinit var btnSetDeviceOwner: Button
 
@@ -55,12 +54,14 @@ class MainActivity : AppCompatActivity() {
         tvDeviceOwner = findViewById(R.id.tv_device_owner)
         tvDeviceId = findViewById(R.id.tv_device_id)
         ivQrCode = findViewById(R.id.iv_qr_code)
-        etServerUrl = findViewById(R.id.et_server_url)
         btnStartService = findViewById(R.id.btn_start_service)
         btnSetDeviceOwner = findViewById(R.id.btn_set_device_owner)
 
-        // 显示已保存的服务器地址
-        etServerUrl.setText(ServerConfig.getServerUrl(this))
+        // 长按状态文字弹出密码输入，验证通过才能进入服务器设置
+        tvStatus.setOnLongClickListener {
+            showPasswordDialog()
+            true
+        }
 
         // 启动/停止服务
         btnStartService.setOnClickListener {
@@ -82,18 +83,6 @@ class MainActivity : AppCompatActivity() {
         // 设备所有者设置提示
         btnSetDeviceOwner.setOnClickListener {
             showDeviceOwnerInstructions()
-        }
-
-        // 保存服务器地址
-        val btnSaveServer = findViewById<Button>(R.id.btn_save_server)
-        btnSaveServer.setOnClickListener {
-            val url = etServerUrl.text.toString().trim()
-            if (url.isEmpty()) {
-                Toast.makeText(this, "请输入服务器地址", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            ServerConfig.setServerUrl(this, url)
-            Toast.makeText(this, "服务器地址已保存", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -174,6 +163,47 @@ adb shell dpm set-device-owner com.xianzhi.childapp/.DeviceAdminReceiver
             .setTitle("设置设备所有者")
             .setMessage(message)
             .setPositiveButton("知道了", null)
+            .show()
+    }
+
+    private fun showPasswordDialog() {
+        val input = EditText(this).apply {
+            hint = "输入6位动态密码"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setSingleLine()
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("验证密码")
+            .setView(input)
+            .setPositiveButton("确认") { _, _ ->
+                val code = input.text.toString().trim()
+                if (TimePassword.verify(code)) {
+                    showServerConfigDialog()
+                } else {
+                    Toast.makeText(this, "密码错误", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showServerConfigDialog() {
+        val input = EditText(this).apply {
+            hint = "孩子-服务端地址（如 wss://xxx.workers.dev/ws）"
+            setText(ServerConfig.getServerUrl(this@MainActivity))
+            setSingleLine()
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("服务器设置")
+            .setView(input)
+            .setPositiveButton("保存") { _, _ ->
+                val url = input.text.toString().trim()
+                if (url.isNotEmpty()) {
+                    ServerConfig.setServerUrl(this, url)
+                    Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("取消", null)
             .show()
     }
 }
