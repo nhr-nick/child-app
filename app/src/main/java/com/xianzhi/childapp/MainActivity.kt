@@ -1,0 +1,128 @@
+package com.xianzhi.childapp
+
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
+import android.content.Intent
+import android.os.Build
+import android.os.Bundle
+import android.widget.Button
+import android.widget.Switch
+import android.widget.EditText
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+
+/**
+ * 主Activity
+ * 显示当前状态，提供手动操作入口
+ */
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var tvStatus: TextView
+    private lateinit var tvDeviceOwner: TextView
+    private lateinit var tvDeviceId: TextView
+    private lateinit var etDnsHostname: EditText
+    private lateinit var switchDns: Switch
+    private lateinit var btnStartService: Button
+    private lateinit var btnSetDeviceOwner: Button
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        initViews()
+        updateStatus()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateStatus()
+    }
+
+    private fun initViews() {
+        tvStatus = findViewById(R.id.tv_status)
+        tvDeviceOwner = findViewById(R.id.tv_device_owner)
+        tvDeviceId = findViewById(R.id.tv_device_id)
+        etDnsHostname = findViewById(R.id.et_dns_hostname)
+        switchDns = findViewById(R.id.switch_dns)
+        btnStartService = findViewById(R.id.btn_start_service)
+        btnSetDeviceOwner = findViewById(R.id.btn_set_device_owner)
+
+        // 启动/停止服务
+        btnStartService.setOnClickListener {
+            val serviceIntent = Intent(this, WebSocketService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+            Toast.makeText(this, "管控服务已启动", Toast.LENGTH_SHORT).show()
+            updateStatus()
+        }
+
+        // 设置加密DNS
+        switchDns.setOnCheckedChangeListener { _, isChecked ->
+            val hostname = etDnsHostname.text.toString().trim()
+            if (hostname.isEmpty()) {
+                Toast.makeText(this, "请输入DNS域名", Toast.LENGTH_SHORT).show()
+                switchDns.isChecked = !isChecked
+                return@setOnCheckedChangeListener
+            }
+
+            if (isChecked) {
+                val success = AppFreezeManager.setPrivateDns(this, hostname)
+                Toast.makeText(
+                    this,
+                    if (success) "加密DNS已设置" else "设置失败，请检查设备所有者权限",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
+                val componentName = ComponentName(this, DeviceAdminReceiver::class.java)
+                try {
+                    dpm.setGlobalSetting(componentName, "private_dns_mode", "off")
+                    Toast.makeText(this, "加密DNS已关闭", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "关闭DNS失败", Toast.LENGTH_SHORT).show()
+                    switchDns.isChecked = true
+                }
+            }
+        }
+
+        // 设备所有者设置提示
+        btnSetDeviceOwner.setOnClickListener {
+            showDeviceOwnerInstructions()
+        }
+    }
+
+    private fun updateStatus() {
+        val isOwner = AppFreezeManager.isDeviceOwner(this)
+        tvDeviceOwner.text = if (isOwner) "设备所有者: 已激活" else "设备所有者: 未激活"
+        tvDeviceId.text = "设备ID: ${DeviceIdManager.getDeviceId(this)}"
+        btnStartService.isEnabled = isOwner
+        switchDns.isEnabled = isOwner
+        // 设备所有者激活时确保防卸载
+        if (isOwner) {
+            AppFreezeManager.protectSelf(this)
+        }
+    }
+
+    private fun showDeviceOwnerInstructions() {
+        val message = """
+请通过ADB命令设置设备所有者：
+
+1. 确保设备上没有其他设备管理器
+2. 连接电脑，执行以下命令：
+
+adb shell dpm set-device-owner com.xianzhi.childapp/.DeviceAdminReceiver
+
+3. 如果提示已有账户，先移除所有账户后重试
+        """.trimIndent()
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("设置设备所有者")
+            .setMessage(message)
+            .setPositiveButton("知道了", null)
+            .show()
+    }
+}
