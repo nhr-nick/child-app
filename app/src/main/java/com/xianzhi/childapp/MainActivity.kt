@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
+import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -26,6 +27,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvStatus: TextView
     private lateinit var tvDeviceOwner: TextView
     private lateinit var tvDeviceId: TextView
+    private lateinit var etServerUrl: EditText
     private lateinit var btnStartService: Button
     private lateinit var btnSetDeviceOwner: Button
 
@@ -46,8 +48,12 @@ class MainActivity : AppCompatActivity() {
         tvStatus = findViewById(R.id.tv_status)
         tvDeviceOwner = findViewById(R.id.tv_device_owner)
         tvDeviceId = findViewById(R.id.tv_device_id)
+        etServerUrl = findViewById(R.id.et_server_url)
         btnStartService = findViewById(R.id.btn_start_service)
         btnSetDeviceOwner = findViewById(R.id.btn_set_device_owner)
+
+        // 显示已保存的服务器地址
+        etServerUrl.setText(ServerConfig.getServerUrl(this))
 
         // 启动/停止服务
         btnStartService.setOnClickListener {
@@ -69,6 +75,18 @@ class MainActivity : AppCompatActivity() {
         // 设备所有者设置提示
         btnSetDeviceOwner.setOnClickListener {
             showDeviceOwnerInstructions()
+        }
+
+        // 保存服务器地址
+        val btnSaveServer = findViewById<Button>(R.id.btn_save_server)
+        btnSaveServer.setOnClickListener {
+            val url = etServerUrl.text.toString().trim()
+            if (url.isEmpty()) {
+                Toast.makeText(this, "请输入服务器地址", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            ServerConfig.setServerUrl(this, url)
+            Toast.makeText(this, "服务器地址已保存", Toast.LENGTH_SHORT).show()
         }
     }
 

@@ -34,15 +34,15 @@ class WebSocketService : Service() {
     private var scheduler: ScheduledExecutorService? = null
     private var isConnecting = false
 
-    // 配置：替换为你的孩子-服务端地址
-    private val SERVER_URL = "wss://child-server.YOUR-SUBDOMAIN.workers.dev/ws"
     private lateinit var deviceId: String
+    private lateinit var serverUrl: String
 
     private val gson = Gson()
 
     override fun onCreate() {
         super.onCreate()
         deviceId = DeviceIdManager.getDeviceId(this)
+        serverUrl = ServerConfig.getServerUrl(this)
         createNotificationChannel()
         try {
             startForeground(NOTIFICATION_ID, createNotification())
@@ -76,7 +76,7 @@ class WebSocketService : Service() {
         isConnecting = true
 
         try {
-            val uri = URI("$SERVER_URL?deviceId=$deviceId")
+            val uri = URI("$serverUrl?deviceId=$deviceId")
             webSocketClient = object : WebSocketClient(uri) {
                 override fun onOpen(handshake: ServerHandshake?) {
                     Log.d(TAG, "WebSocket连接已建立")

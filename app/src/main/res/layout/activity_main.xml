@@ -55,7 +55,30 @@
             android:layout_width="match_parent"
             android:layout_height="48dp"
             android:text="启动管控服务"
-            android:layout_marginBottom="24dp" />
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="服务器设置"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <EditText
+            android:id="@+id/et_server_url"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:hint="孩子-服务端地址（如 wss://xxx.workers.dev/ws）"
+            android:inputType="textUri"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_save_server"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="保存服务器地址"
+            android:layout_marginBottom="16dp" />
 
     </LinearLayout>
 </ScrollView>
