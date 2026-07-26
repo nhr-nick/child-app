@@ -42,7 +42,13 @@ class WebSocketService : Service() {
         super.onCreate()
         deviceId = DeviceIdManager.getDeviceId(this)
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, createNotification())
+        try {
+            startForeground(NOTIFICATION_ID, createNotification())
+        } catch (e: Exception) {
+            Log.e(TAG, "启动前台服务失败，通知权限可能未授予", e)
+            stopSelf()
+            return
+        }
         // 确保自身防卸载
         AppFreezeManager.protectSelf(this)
         connectWebSocket()

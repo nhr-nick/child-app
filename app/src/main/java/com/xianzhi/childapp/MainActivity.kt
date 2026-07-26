@@ -1,22 +1,29 @@
 package com.xianzhi.childapp
 
+import android.Manifest
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Button
 import android.widget.Switch
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 
 /**
  * 主Activity
  * 显示当前状态，提供手动操作入口
  */
 class MainActivity : AppCompatActivity() {
+
+    private val REQUEST_NOTIFICATION_PERMISSION = 1001
 
     private lateinit var tvStatus: TextView
     private lateinit var tvDeviceOwner: TextView
@@ -50,14 +57,19 @@ class MainActivity : AppCompatActivity() {
 
         // 启动/停止服务
         btnStartService.setOnClickListener {
-            val serviceIntent = Intent(this, WebSocketService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    ActivityCompat.requestPermissions(
+                        this,
+                        arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                        REQUEST_NOTIFICATION_PERMISSION
+                    )
+                    return@setOnClickListener
+                }
             }
-            Toast.makeText(this, "管控服务已启动", Toast.LENGTH_SHORT).show()
-            updateStatus()
+            startControlService()
         }
 
         // 设置加密DNS
@@ -104,6 +116,37 @@ class MainActivity : AppCompatActivity() {
         // 设备所有者激活时确保防卸载
         if (isOwner) {
             AppFreezeManager.protectSelf(this)
+        }
+    }
+
+    private fun startControlService() {
+        try {
+            val serviceIntent = Intent(this, WebSocketService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+            Toast.makeText(this, "管控服务已启动", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e("MainActivity", "启动管控服务失败", e)
+            Toast.makeText(this, "启动失败: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+        updateStatus()
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_NOTIFICATION_PERMISSION) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                startControlService()
+            } else {
+                Toast.makeText(this, "需要通知权限才能启动管控服务", Toast.LENGTH_LONG).show()
+            }
         }
     }
 

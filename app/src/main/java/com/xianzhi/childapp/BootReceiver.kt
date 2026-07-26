@@ -14,11 +14,15 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (Intent.ACTION_BOOT_COMPLETED == intent.action) {
             Log.d(TAG, "开机启动，启动WebSocket服务")
-            val serviceIntent = Intent(context, WebSocketService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent)
-            } else {
-                context.startService(serviceIntent)
+            try {
+                val serviceIntent = Intent(context, WebSocketService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "开机启动服务失败", e)
             }
         }
     }
