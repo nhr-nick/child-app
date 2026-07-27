@@ -10,7 +10,7 @@ object ServerConfig {
 
     private const val PREFS_NAME = "child_app_prefs"
     private const val KEY_SERVER_URL = "server_url"
-    private const val DEFAULT_SERVER_URL = "wss://child-server.YOUR-SUBDOMAIN.workers.dev/ws"
+    private const val DEFAULT_SERVER_URL = "wss://xianzhix.100322.xyz/ws"
 
     fun getServerUrl(context: Context): String {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

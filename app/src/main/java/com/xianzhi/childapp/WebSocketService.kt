@@ -11,8 +11,6 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import com.google.gson.Gson
-import com.google.gson.JsonParser
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
 import java.net.URI
@@ -41,12 +39,11 @@ class WebSocketService : Service() {
     private lateinit var deviceId: String
     private lateinit var serverUrl: String
 
-    private val gson = Gson()
-
     override fun onCreate() {
         super.onCreate()
         deviceId = DeviceIdManager.getDeviceId(this)
         serverUrl = ServerConfig.getServerUrl(this)
+        Log.d(TAG, "服务启动, deviceId=$deviceId, serverUrl=$serverUrl")
         createNotificationChannel()
         try {
             startForeground(NOTIFICATION_ID, createNotification())
@@ -57,8 +54,12 @@ class WebSocketService : Service() {
         }
         // 确保自身防卸载
         AppFreezeManager.protectSelf(this)
+
+        // 服务启动时立即上报应用（不依赖WebSocket连接）
+        reportInstalledApps()
+
         connectWebSocket()
-        startReconnectScheduler()
+        startScheduler()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -73,6 +74,23 @@ class WebSocketService : Service() {
         scheduler?.shutdown()
     }
 
+    // ========== HTTP工具 ==========
+
+    private fun getHttpBaseUrl(): String {
+        return serverUrl
+            .replace("/ws", "")
+            .replace("wss://", "https://")
+            .replace("ws://", "http://")
+    }
+
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
+
+    private val jsonType = "application/json; charset=utf-8".toMediaType()
+
     // ========== WebSocket连接 ==========
 
     private fun connectWebSocket() {
@@ -80,12 +98,14 @@ class WebSocketService : Service() {
         isConnecting = true
 
         try {
-            val uri = URI("$serverUrl?deviceId=$deviceId")
+            val wsUrl = "$serverUrl?deviceId=$deviceId"
+            Log.d(TAG, "连接WebSocket: $wsUrl")
+            val uri = URI(wsUrl)
             webSocketClient = object : WebSocketClient(uri) {
                 override fun onOpen(handshake: ServerHandshake?) {
                     Log.d(TAG, "WebSocket连接已建立")
                     isConnecting = false
-                    // 连接成功后上报已安装应用列表
+                    // 连接成功后再上报一次应用
                     reportInstalledApps()
                 }
 
@@ -95,12 +115,12 @@ class WebSocketService : Service() {
                 }
 
                 override fun onClose(code: Int, reason: String?, remote: Boolean) {
-                    Log.d(TAG, "WebSocket连接关闭: $reason")
+                    Log.d(TAG, "WebSocket连接关闭: code=$code, reason=$reason, remote=$remote")
                     isConnecting = false
                 }
 
                 override fun onError(ex: Exception?) {
-                    Log.e(TAG, "WebSocket错误", ex)
+                    Log.e(TAG, "WebSocket错误: ${ex?.message}", ex)
                     isConnecting = false
                 }
             }
@@ -154,8 +174,6 @@ class WebSocketService : Service() {
 
     /**
      * 处理冻结应用列表
-     * 1. 获取当前已冻结的应用
-     * 2. 对比差异，冻结新应用，解冻不在列表中的应用
      */
     private fun handleFrozenApps(frozenApps: List<String>) {
         val pm = packageManager
@@ -163,13 +181,11 @@ class WebSocketService : Service() {
             .map { it.packageName }
             .toSet()
 
-        // 冻结列表中的应用
         val appsToFreeze = frozenApps.filter { it in installedApps }
         for (app in appsToFreeze) {
             AppFreezeManager.freezeApp(this, app)
         }
 
-        // 解冻不在列表中的已冻结应用
         for (installedApp in installedApps) {
             if (installedApp !in frozenApps && installedApp != packageName) {
                 if (AppFreezeManager.isAppFrozen(this, installedApp)) {
@@ -183,14 +199,13 @@ class WebSocketService : Service() {
 
     /**
      * 处理DNS设置推送
-     * 由家长端远程控制加密DNS的开启/关闭
      */
     private fun handleDnsSetting(hostname: String, enabled: Boolean) {
+        Log.d(TAG, "收到DNS设置推送: hostname=$hostname, enabled=$enabled")
         if (enabled && hostname.isNotEmpty()) {
             val success = AppFreezeManager.setPrivateDns(this, hostname)
             Log.d(TAG, "设置加密DNS: $hostname, 结果: $success")
         } else {
-            // 关闭加密DNS
             val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
             val componentName = ComponentName(this, DeviceAdminReceiver::class.java)
             try {
@@ -202,32 +217,30 @@ class WebSocketService : Service() {
         }
     }
 
-    /**
-     * 处理远程卸载应用
-     */
     private fun handleUninstallApp(packageName: String) {
         val success = AppFreezeManager.uninstallApp(this, packageName)
         Log.d(TAG, "远程卸载应用: $packageName, 结果: $success")
     }
 
-    /**
-     * 处理安装限制推送
-     */
     private fun handleInstallRestriction(blocked: Boolean) {
         val success = AppFreezeManager.setInstallBlocked(this, blocked)
         Log.d(TAG, "安装限制设置: $blocked, 结果: $success")
     }
 
-    // ========== 自动重连 ==========
+    // ========== 定时任务 ==========
 
-    private fun startReconnectScheduler() {
+    private fun startScheduler() {
         scheduler = Executors.newSingleThreadScheduledExecutor()
+
+        // 30秒后开始重连检查
         scheduler?.scheduleAtFixedRate({
             if (webSocketClient?.isOpen != true && !isConnecting) {
                 Log.d(TAG, "尝试重连WebSocket...")
                 connectWebSocket()
             }
         }, 10, 30, TimeUnit.SECONDS)
+
+        // 不做定期上报，仅在服务启动和WebSocket连接成功时上报
     }
 
     // ========== 前台通知 ==========
@@ -265,20 +278,15 @@ class WebSocketService : Service() {
 
     // ========== 上报已安装应用 ==========
 
-    /**
-     * 读取已安装的非系统应用列表，上报给服务端
-     */
     private fun reportInstalledApps() {
         try {
             val pm = packageManager
             val apps = pm.getInstalledApplications(0)
                 .filter { appInfo ->
-                    // 过滤掉系统应用和自身
                     (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0
                             && appInfo.packageName != packageName
                 }
 
-            // 用JSONObject构建JSON，避免Gson序列化兼容问题
             val jsonBody = org.json.JSONObject().apply {
                 put("deviceId", deviceId)
                 put("apps", org.json.JSONArray().apply {
@@ -291,25 +299,20 @@ class WebSocketService : Service() {
                 })
             }.toString()
 
-            // 通过HTTP上报到孩子-服务端
+            Log.d(TAG, "准备上报${apps.size}个应用到 $getHttpBaseUrl()/api/report-apps")
+
             Thread {
                 try {
-                    val baseUrl = serverUrl.replace("/ws", "").replace("wss://", "https://").replace("ws://", "http://")
-                    val url = "$baseUrl/api/report-apps"
-                    val client = OkHttpClient.Builder()
-                        .connectTimeout(10, TimeUnit.SECONDS)
-                        .writeTimeout(10, TimeUnit.SECONDS)
-                        .build()
-                    val jsonType = "application/json; charset=utf-8".toMediaType()
+                    val url = "${getHttpBaseUrl()}/api/report-apps"
                     val request = Request.Builder()
                         .url(url)
                         .post(jsonBody.toRequestBody(jsonType))
                         .build()
-                    val response = client.newCall(request).execute()
+                    val response = httpClient.newCall(request).execute()
                     val responseBody = response.body?.string()
                     Log.d(TAG, "上报应用列表: ${apps.size}个应用, HTTP ${response.code}, 响应: $responseBody")
                 } catch (e: Exception) {
-                    Log.e(TAG, "上报应用列表HTTP请求失败", e)
+                    Log.e(TAG, "上报应用列表HTTP请求失败: ${e.message}", e)
                 }
             }.start()
         } catch (e: Exception) {
