@@ -36,6 +36,7 @@ class WebSocketService : Service() {
     private var webSocket: WebSocket? = null
     private var scheduler: ScheduledExecutorService? = null
     private var isConnecting = false
+    private var isConnected = false
 
     private lateinit var deviceId: String
     private lateinit var serverUrl: String
@@ -110,7 +111,7 @@ class WebSocketService : Service() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     Log.d(TAG, "WebSocket连接已建立, code=${response.code}")
                     isConnecting = false
-                    // 连接成功后再上报一次应用
+                    isConnected = true
                     reportInstalledApps()
                 }
 
@@ -127,11 +128,13 @@ class WebSocketService : Service() {
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     Log.d(TAG, "WebSocket已关闭: code=$code, reason=$reason")
                     isConnecting = false
+                    isConnected = false
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     Log.e(TAG, "WebSocket失败: ${t.message}", t)
                     isConnecting = false
+                    isConnected = false
                 }
             })
         } catch (e: Exception) {
@@ -239,9 +242,9 @@ class WebSocketService : Service() {
     private fun startScheduler() {
         scheduler = Executors.newSingleThreadScheduledExecutor()
 
-        // 每30秒检查一次，如果没在连接中就尝试重连
+        // 每30秒检查一次，仅在未连接且未在连接中时重连
         scheduler?.scheduleAtFixedRate({
-            if (!isConnecting) {
+            if (!isConnected && !isConnecting) {
                 Log.d(TAG, "尝试重连WebSocket...")
                 connectWebSocket()
             }

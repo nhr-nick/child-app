@@ -98,6 +98,7 @@ object AppFreezeManager {
 
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                // 第一步：通过DevicePolicyManager设置
                 dpm.setGlobalSetting(
                     componentName,
                     "private_dns_mode",
@@ -108,7 +109,36 @@ object AppFreezeManager {
                     "private_dns_specifier",
                     dnsHostname
                 )
-                Log.d(TAG, "已设置加密DNS: $dnsHostname")
+                Log.d(TAG, "已通过DPM设置加密DNS: $dnsHostname")
+
+                // 第二步：通过settings命令强制写入并立即生效
+                try {
+                    Runtime.getRuntime().exec(arrayOf(
+                        "settings", "put", "global", "private_dns_mode", "hostname"
+                    )).waitFor()
+                    Runtime.getRuntime().exec(arrayOf(
+                        "settings", "put", "global", "private_dns_specifier", dnsHostname
+                    )).waitFor()
+                    Log.d(TAG, "已通过settings命令写入DNS设置")
+                } catch (e: Exception) {
+                    Log.w(TAG, "settings命令写入失败（不影响DPM设置）", e)
+                }
+
+                // 第三步：刷新网络让DNS设置立即生效
+                try {
+                    // 先断开再重连WiFi，强制系统重新读取DNS配置
+                    Runtime.getRuntime().exec(arrayOf(
+                        "cmd", "connectivity", "airplane-mode", "enable"
+                    )).waitFor()
+                    Thread.sleep(1500)
+                    Runtime.getRuntime().exec(arrayOf(
+                        "cmd", "connectivity", "airplane-mode", "disable"
+                    )).waitFor()
+                    Log.d(TAG, "已切换飞行模式刷新网络")
+                } catch (e: Exception) {
+                    Log.w(TAG, "刷新网络失败", e)
+                }
+
                 true
             } else {
                 Log.w(TAG, "Android版本不支持加密DNS设置")
