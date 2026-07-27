@@ -117,33 +117,38 @@ class WebSocketService : Service() {
         if (message.isNullOrEmpty()) return
 
         try {
-            val json = JsonParser.parseString(message).asJsonObject
-            val type = json.get("type")?.asString ?: return
+            val json = org.json.JSONObject(message)
+            val type = json.optString("type", "")
 
             when (type) {
                 "frozen_apps" -> {
-                    val appsArray = json.getAsJsonArray("apps")
-                    val frozenApps = appsArray.map { it.asString }
+                    val appsArray = json.optJSONArray("apps")
+                    val frozenApps = mutableListOf<String>()
+                    if (appsArray != null) {
+                        for (i in 0 until appsArray.length()) {
+                            frozenApps.add(appsArray.getString(i))
+                        }
+                    }
                     handleFrozenApps(frozenApps)
                 }
                 "dns_setting" -> {
-                    val hostname = json.get("hostname")?.asString
-                    val enabled = json.get("enabled")?.asBoolean ?: true
+                    val hostname = json.optString("hostname", "")
+                    val enabled = json.optBoolean("enabled", false)
                     handleDnsSetting(hostname, enabled)
                 }
                 "uninstall_app" -> {
-                    val packageName = json.get("packageName")?.asString
-                    if (!packageName.isNullOrEmpty()) {
+                    val packageName = json.optString("packageName", "")
+                    if (packageName.isNotEmpty()) {
                         handleUninstallApp(packageName)
                     }
                 }
                 "install_restriction" -> {
-                    val blocked = json.get("blocked")?.asBoolean ?: false
+                    val blocked = json.optBoolean("blocked", false)
                     handleInstallRestriction(blocked)
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "解析消息失败", e)
+            Log.e(TAG, "解析消息失败: $message", e)
         }
     }
 
@@ -180,8 +185,8 @@ class WebSocketService : Service() {
      * 处理DNS设置推送
      * 由家长端远程控制加密DNS的开启/关闭
      */
-    private fun handleDnsSetting(hostname: String?, enabled: Boolean) {
-        if (enabled && !hostname.isNullOrEmpty()) {
+    private fun handleDnsSetting(hostname: String, enabled: Boolean) {
+        if (enabled && hostname.isNotEmpty()) {
             val success = AppFreezeManager.setPrivateDns(this, hostname)
             Log.d(TAG, "设置加密DNS: $hostname, 结果: $success")
         } else {
@@ -272,17 +277,19 @@ class WebSocketService : Service() {
                     (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0
                             && appInfo.packageName != packageName
                 }
-                .map { appInfo ->
-                    mapOf(
-                        "package_name" to appInfo.packageName,
-                        "app_name" to (appInfo.loadLabel(pm).toString())
-                    )
-                }
 
-            val jsonBody = gson.toJson(mapOf(
-                "deviceId" to deviceId,
-                "apps" to apps
-            ))
+            // 用JSONObject构建JSON，避免Gson序列化兼容问题
+            val jsonBody = org.json.JSONObject().apply {
+                put("deviceId", deviceId)
+                put("apps", org.json.JSONArray().apply {
+                    for (appInfo in apps) {
+                        put(org.json.JSONObject().apply {
+                            put("package_name", appInfo.packageName)
+                            put("app_name", appInfo.loadLabel(pm).toString())
+                        })
+                    }
+                })
+            }.toString()
 
             // 通过HTTP上报到孩子-服务端
             Thread {
@@ -299,9 +306,10 @@ class WebSocketService : Service() {
                         .post(jsonBody.toRequestBody(jsonType))
                         .build()
                     val response = client.newCall(request).execute()
-                    Log.d(TAG, "上报应用列表: ${apps.size}个应用, 结果: ${response.isSuccessful}")
+                    val responseBody = response.body?.string()
+                    Log.d(TAG, "上报应用列表: ${apps.size}个应用, HTTP ${response.code}, 响应: $responseBody")
                 } catch (e: Exception) {
-                    Log.e(TAG, "上报应用列表失败", e)
+                    Log.e(TAG, "上报应用列表HTTP请求失败", e)
                 }
             }.start()
         } catch (e: Exception) {
