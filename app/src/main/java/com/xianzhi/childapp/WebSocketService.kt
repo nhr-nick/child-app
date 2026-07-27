@@ -11,9 +11,6 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import org.java_websocket.client.WebSocketClient
-import org.java_websocket.handshake.ServerHandshake
-import java.net.URI
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -21,10 +18,14 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 
 /**
  * WebSocket后台服务
  * 连接孩子-服务端，接收冻结/解冻指令
+ * 使用OkHttp的WebSocket实现
  */
 class WebSocketService : Service() {
 
@@ -32,12 +33,21 @@ class WebSocketService : Service() {
     private val CHANNEL_ID = "websocket_service"
     private val NOTIFICATION_ID = 1
 
-    private var webSocketClient: WebSocketClient? = null
+    private var webSocket: WebSocket? = null
     private var scheduler: ScheduledExecutorService? = null
     private var isConnecting = false
 
     private lateinit var deviceId: String
     private lateinit var serverUrl: String
+
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.MINUTES) // WebSocket需要长连接，不设读超时
+        .pingInterval(30, TimeUnit.SECONDS) // 每30秒发ping保活
+        .build()
+
+    private val jsonType = "application/json; charset=utf-8".toMediaType()
 
     override fun onCreate() {
         super.onCreate()
@@ -52,7 +62,6 @@ class WebSocketService : Service() {
             stopSelf()
             return
         }
-        // 确保自身防卸载
         AppFreezeManager.protectSelf(this)
 
         // 服务启动时立即上报应用（不依赖WebSocket连接）
@@ -70,7 +79,7 @@ class WebSocketService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        webSocketClient?.close()
+        webSocket?.close(1000, "Service destroyed")
         scheduler?.shutdown()
     }
 
@@ -83,15 +92,7 @@ class WebSocketService : Service() {
             .replace("ws://", "http://")
     }
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
-
-    private val jsonType = "application/json; charset=utf-8".toMediaType()
-
-    // ========== WebSocket连接 ==========
+    // ========== WebSocket连接（OkHttp实现） ==========
 
     private fun connectWebSocket() {
         if (isConnecting) return
@@ -100,42 +101,48 @@ class WebSocketService : Service() {
         try {
             val wsUrl = "$serverUrl?deviceId=$deviceId"
             Log.d(TAG, "连接WebSocket: $wsUrl")
-            val uri = URI(wsUrl)
-            webSocketClient = object : WebSocketClient(uri) {
-                override fun onOpen(handshake: ServerHandshake?) {
-                    Log.d(TAG, "WebSocket连接已建立")
+
+            val request = Request.Builder()
+                .url(wsUrl)
+                .build()
+
+            webSocket = httpClient.newWebSocket(request, object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    Log.d(TAG, "WebSocket连接已建立, code=${response.code}")
                     isConnecting = false
                     // 连接成功后再上报一次应用
                     reportInstalledApps()
                 }
 
-                override fun onMessage(message: String?) {
-                    Log.d(TAG, "收到消息: $message")
-                    handleMessage(message)
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    Log.d(TAG, "收到消息: $text")
+                    handleMessage(text)
                 }
 
-                override fun onClose(code: Int, reason: String?, remote: Boolean) {
-                    Log.d(TAG, "WebSocket连接关闭: code=$code, reason=$reason, remote=$remote")
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    Log.d(TAG, "WebSocket正在关闭: code=$code, reason=$reason")
+                    webSocket.close(1000, null)
+                }
+
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    Log.d(TAG, "WebSocket已关闭: code=$code, reason=$reason")
                     isConnecting = false
                 }
 
-                override fun onError(ex: Exception?) {
-                    Log.e(TAG, "WebSocket错误: ${ex?.message}", ex)
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    Log.e(TAG, "WebSocket失败: ${t.message}", t)
                     isConnecting = false
                 }
-            }
-            webSocketClient?.connect()
+            })
         } catch (e: Exception) {
-            Log.e(TAG, "WebSocket连接失败", e)
+            Log.e(TAG, "WebSocket连接异常", e)
             isConnecting = false
         }
     }
 
     // ========== 消息处理 ==========
 
-    private fun handleMessage(message: String?) {
-        if (message.isNullOrEmpty()) return
-
+    private fun handleMessage(message: String) {
         try {
             val json = org.json.JSONObject(message)
             val type = json.optString("type", "")
@@ -232,15 +239,13 @@ class WebSocketService : Service() {
     private fun startScheduler() {
         scheduler = Executors.newSingleThreadScheduledExecutor()
 
-        // 30秒后开始重连检查
+        // 每30秒检查一次，如果没在连接中就尝试重连
         scheduler?.scheduleAtFixedRate({
-            if (webSocketClient?.isOpen != true && !isConnecting) {
+            if (!isConnecting) {
                 Log.d(TAG, "尝试重连WebSocket...")
                 connectWebSocket()
             }
         }, 10, 30, TimeUnit.SECONDS)
-
-        // 不做定期上报，仅在服务启动和WebSocket连接成功时上报
     }
 
     // ========== 前台通知 ==========
@@ -299,11 +304,12 @@ class WebSocketService : Service() {
                 })
             }.toString()
 
-            Log.d(TAG, "准备上报${apps.size}个应用到 $getHttpBaseUrl()/api/report-apps")
+            val baseUrl = getHttpBaseUrl()
+            Log.d(TAG, "准备上报${apps.size}个应用到 $baseUrl/api/report-apps")
 
             Thread {
                 try {
-                    val url = "${getHttpBaseUrl()}/api/report-apps"
+                    val url = "$baseUrl/api/report-apps"
                     val request = Request.Builder()
                         .url(url)
                         .post(jsonBody.toRequestBody(jsonType))
