@@ -3,6 +3,7 @@ package com.xianzhi.childapp
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.UserManager
@@ -156,15 +157,36 @@ object AppFreezeManager {
 
     /**
      * 远程卸载应用（需要设备所有者权限）
+     * 使用反射调用隐藏API uninstallPackage
      */
     fun uninstallApp(context: Context, packageName: String): Boolean {
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val componentName = ComponentName(context, DeviceAdminReceiver::class.java)
 
         return try {
-            dpm.uninstallPackage(componentName, packageName)
+            // 尝试反射调用 DevicePolicyManager.uninstallPackage（隐藏API）
+            val method = DevicePolicyManager::class.java.getMethod(
+                "uninstallPackage",
+                ComponentName::class.java,
+                String::class.java
+            )
+            method.invoke(dpm, componentName, packageName)
             Log.d(TAG, "已卸载应用: $packageName")
             true
+        } catch (e: NoSuchMethodException) {
+            // 反射失败，使用Intent方式卸载
+            try {
+                val intent = Intent(Intent.ACTION_DELETE).apply {
+                    data = Uri.parse("package:$packageName")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+                Log.d(TAG, "通过Intent卸载应用: $packageName")
+                true
+            } catch (ex: Exception) {
+                Log.e(TAG, "Intent卸载应用失败: $packageName", ex)
+                false
+            }
         } catch (e: Exception) {
             Log.e(TAG, "卸载应用失败: $packageName", e)
             false
@@ -184,8 +206,14 @@ object AppFreezeManager {
                 dpm.addUserRestriction(componentName, UserManager.DISALLOW_INSTALL_APPS)
                 dpm.addUserRestriction(componentName, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
             } else {
-                dpm.removeUserRestriction(componentName, UserManager.DISALLOW_INSTALL_APPS)
-                dpm.removeUserRestriction(componentName, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+                // removeUserRestriction 是隐藏API，使用反射调用
+                val removeMethod = DevicePolicyManager::class.java.getMethod(
+                    "removeUserRestriction",
+                    ComponentName::class.java,
+                    String::class.java
+                )
+                removeMethod.invoke(dpm, componentName, UserManager.DISALLOW_INSTALL_APPS)
+                removeMethod.invoke(dpm, componentName, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
             }
             Log.d(TAG, "安装限制设置: $blocked")
             true
